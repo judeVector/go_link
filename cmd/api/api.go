@@ -1,28 +1,59 @@
 package main
 
 import (
+	"github/judevector/go_link/internal/store"
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 type application struct {
 	config config
+	store  store.Storage
 }
 
 type config struct {
 	addr string
+	db   dbConfig
 }
 
-func (app *application) mount() *http.ServeMux {
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("GET /v1/health", app.healthCheckHandler)
-
-	return mux
+type dbConfig struct {
+	addr         string
+	maxOpenConns int
+	maxIdleConns int
+	maxIdleTime  string
 }
 
-func (app *application) run(mux *http.ServeMux) error {
+func (app *application) mount() http.Handler {
+	r := chi.NewRouter()
+
+	r.Use(middleware.Logger)
+	r.Use(middleware.RequestID)
+	r.Use(middleware.ClientIPFromRemoteAddr)
+	r.Use(middleware.Recoverer)
+
+	// Set a timeout value on the request context (ctx), that will signal
+	// through ctx.Done() that the request has timed out and further
+	// processing should be stopped.
+	r.Use(middleware.Timeout(60 * time.Second))
+
+	r.Route("/v1", func(r chi.Router) {
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte("welcome"))
+		})
+
+		r.Get("/health", app.healthCheckHandler)
+		r.Post("/users", app.createUserHandler)
+		r.Post("/posts", app.createPostHandler)
+	})
+
+	return r
+}
+
+func (app *application) run(mux http.Handler) error {
 
 	srv := &http.Server{
 		Addr:         app.config.addr,
